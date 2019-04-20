@@ -48,6 +48,13 @@ where
         self.shape.as_ref().len() - 2
     }
 
+    pub fn hw_stride(&self) -> D {
+        match self.fmt {
+            DataFormat::NHWC => self.c_dim(),
+            DataFormat::NCHW => 1.into(),
+        }
+    }
+
     pub fn n_axis(&self) -> usize {
         0
     }

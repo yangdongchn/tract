@@ -3,7 +3,6 @@ use ndarray::prelude::*;
 use num_traits::{AsPrimitive, Float};
 
 use super::{DataFormat, PaddingSpec, Patch};
-use crate::ops::nn::patches::PatchVisitor;
 
 #[derive(Debug, Clone, new, Default)]
 pub struct AvgPool {
@@ -16,14 +15,14 @@ pub struct AvgPool {
 
 impl AvgPool {
     fn patch(&self, input_full_shape: &[usize]) -> Patch {
-        let hw_rank = self.data_fmt.shape(input_full_shape).hw_rank();
+        let shape = self.data_fmt.shape(input_full_shape);
         Patch::new(
-            self.data_fmt,
-            tvec![1; hw_rank],
+            tvec![1; shape.hw_rank()],
             self.kernel_shape.clone(),
             &self.padding,
-            self.strides.clone().unwrap_or_else(|| tvec![1; hw_rank]),
-            input_full_shape.into(),
+            self.strides.clone().unwrap_or_else(|| tvec![1; shape.hw_rank()]),
+            shape.hw_dims().into(),
+            shape.hw_stride(),
         )
     }
 
@@ -33,7 +32,7 @@ impl AvgPool {
         usize: AsPrimitive<T>,
     {
         let patch = self.patch(inputs[0].shape());
-        FixedAvgPool::new(patch, self.count_include_pad).eval(inputs)
+        FixedAvgPool::new(self.data_fmt.clone(), patch, self.count_include_pad).eval(inputs)
     }
 }
 
@@ -51,14 +50,14 @@ impl Op for AvgPool {
         if let Some(shape) = inputs[0].shape.as_finite() {
             let dt = inputs[0].datum_type;
             let patch = self.patch(&*shape);
-            fn fixed<T>(patch: Patch, count_include_pad: bool) -> Box<Op>
+            fn fixed<T>(data_fmt: &DataFormat, patch: Patch, count_include_pad: bool) -> Box<Op>
             where
                 T: Datum + Float,
                 usize: AsPrimitive<T>,
             {
-                Box::new(FixedAvgPool::new(patch, count_include_pad))
+                Box::new(FixedAvgPool::new(data_fmt.clone(), patch, count_include_pad))
             }
-            let op = dispatch_floatlike!(fixed(dt)(patch, self.count_include_pad));
+            let op = dispatch_floatlike!(fixed(dt)(&self.data_fmt, patch, self.count_include_pad));
             return Ok(Some(TypedModelPatch::single_unary_op(model, node, op)?));
         }
         Ok(None)
@@ -91,8 +90,8 @@ impl InferenceRulesOp for AvgPool {
                 &ones,
                 self.strides.as_ref().unwrap_or(&ones),
             );
-            for (ix, &d) in computed.output.iter().enumerate() {
-                s.equals(&outputs[0].shape[ix + ishape.h_axis()], d)?;
+            for (ix, d) in computed.dims.iter().enumerate() {
+                s.equals(&outputs[0].shape[ix + ishape.h_axis()], d.output)?;
             }
             s.equals(&outputs[0].shape[ishape.n_axis()], ishape.n_dim())?;
             s.equals(&outputs[0].shape[ishape.c_axis()], ishape.c_dim())?;
@@ -107,6 +106,7 @@ where
     T: Datum + Float,
     usize: AsPrimitive<T>,
 {
+    data_fmt: DataFormat,
     patch: Patch,
     count_include_pad: bool,
     _phantom: PhantomData<T>,
@@ -117,6 +117,7 @@ where
     T: Datum + Float,
     usize: AsPrimitive<T>,
 {
+    /*
     #[inline(never)]
     fn valid_2d_nhwc(&self, input: &ArrayView4<T>, output: &mut ArrayViewMut4<T>) {
         unsafe {
@@ -287,12 +288,25 @@ where
         }
         Ok(output)
     }
+    */
 
     pub fn generic(&self, input: &ArrayViewD<T>) -> TractResult<ArrayD<T>> {
-        let output_shape: TVec<usize> =
-            self.patch.output_full_shape(self.patch.input_shape.c_dim());
+        let mut output_shape: TVec<usize> = input.shape().into();
+        let shape = self.data_fmt.shape(input.shape());
+        for i in shape.hw_axes() {
+            output_shape[i] = self.patch.output_spatial_shape[i];
+        }
         let input = input.view();
-        let visitor = self.patch.wrap(&input);
+        for n in 0..shape.n() {
+            for point in self.patch.visit_all_2() {
+                /*
+                let mut count = self.patch.valid_for_point(&point);
+                for c in 0..shape.c() {
+                    let mut sum = T::zero();
+                }
+                */
+            }
+        }
         let output = ArrayD::from_shape_fn(&*output_shape, |coords| {
             self.compute_one(&visitor, coords.slice())
         });
@@ -328,11 +342,15 @@ where
         let input = args_1!(inputs);
         let input = input.to_array_view::<T>()?;
 
+        /*
         let result = if self.patch.kernel_spatial_shape.len() == 2 {
             self.two_d(&input.into_dimensionality()?)?.into_dyn()
         } else {
-            self.generic(&input)?
+        */
+            let result = self.generic(&input)?
+        /*
         };
+        */
 
         Ok(tvec!(result.into()))
     }
@@ -349,15 +367,7 @@ where
         inputs: &'p [TensorProxy],
         outputs: &'p [TensorProxy],
     ) -> InferenceResult {
-        check_input_arity(&inputs, 1)?;
-        check_output_arity(&outputs, 1)?;
-        s.equals(&inputs[0].datum_type, T::datum_type())?;
-        s.equals(&outputs[0].datum_type, T::datum_type())?;
-        s.equals(&outputs[0].rank, &inputs[0].rank)?;
-        s.equals(&inputs[0].shape, ShapeFact::from(&*self.patch.input_shape.shape))?;
-        let shape: TVec<usize> = self.patch.output_full_shape(self.patch.input_shape.c_dim());
-        s.equals(&outputs[0].shape, ShapeFact::from(shape))?;
-        Ok(())
+        unreachable!()
     }
 }
 
@@ -372,12 +382,12 @@ mod tests {
     pub fn patch_2d_and_data() -> BoxedStrategy<(Patch, Array4<f32>)> {
         patch_2d()
             .prop_flat_map(|p| {
-                let len = p.input_shape.shape.iter().cloned().product();
+                let len = p.input_spatial_shape.iter().cloned().product();
                 let vec = vec(-5.0..5.0f32, len..=len);
                 (Just(p), vec)
             })
             .prop_map(|(p, v)| {
-                let data = ndarray::ArrayD::from_shape_vec(&*p.input_shape.shape, v)
+                let data = ndarray::ArrayD::from_shape_vec(&*p.input_spatial_shape, v)
                     .unwrap()
                     .into_dimensionality()
                     .unwrap();
@@ -390,7 +400,7 @@ mod tests {
         #[test]
         #[ignore]
         fn test_2d((p, d) in patch_2d_and_data()) {
-            let op = FixedAvgPool::new(p, true);
+            let op = FixedAvgPool::new(DataFormat::NHWC, p, true);
             prop_assert_eq!(op.generic(&d.view().into_dyn()).unwrap(), op.two_d(&d.view()).unwrap().into_dyn())
         }
     }

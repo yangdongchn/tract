@@ -60,11 +60,12 @@ where
                 for (coords, hint) in self.patch.visit_all_2() {
                     *full_coords.get_unchecked_mut(h_axis) = coords.0;
                     *full_coords.get_unchecked_mut(h_axis + 1) = coords.1;
+                    let mut it = visitor.at_hint(&[coords.0, coords.1], hint);
                     for c in 0..self.out_channels {
+                        it.rewind();
                         *full_coords.get_unchecked_mut(c_axis) = c;
                         let k = kernel.get_unchecked((kernel_stride * c)..);
                         let mut sum = T::zero();
-                        let mut it = visitor.at_hint(&*full_coords, hint);
                         for i in 0..len {
                             sum +=
                                 *k.get_unchecked(i) * it.next().unsafe_unwrap().unwrap_or(T::zero())

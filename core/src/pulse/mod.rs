@@ -275,6 +275,8 @@ mod tests {
 
     #[test]
     fn test_simple_conv() {
+        unimplemented!()
+            /*
         use crate::ops::nn::*;
 
         let mut model = Model::default();
@@ -288,6 +290,7 @@ mod tests {
 
         let input = arr3(&[[[1.0f32, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0]]]);
         proptest_regular_against_pulse(model, 4, input.into_dyn(), 2).unwrap();
+        */
     }
 
     #[test]

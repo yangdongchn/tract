@@ -14,14 +14,14 @@ pub struct MaxPool {
 
 impl MaxPool {
     fn patch(&self, input_full_shape: &[usize]) -> Patch {
-        let hw_rank = self.data_fmt.shape(input_full_shape).hw_rank();
+        let shape = self.data_fmt.shape(input_full_shape);
         Patch::new(
-            self.data_fmt,
-            tvec![1; hw_rank],
+            tvec![1; shape.hw_rank()],
             self.kernel_shape.clone(),
             &self.padding,
-            self.strides.clone().unwrap_or_else(|| tvec![1; hw_rank]),
-            input_full_shape.into(),
+            self.strides.clone().unwrap_or_else(|| tvec![1; shape.hw_rank()]),
+            shape.hw_dims().into(),
+            shape.hw_stride(),
         )
     }
 }
@@ -38,17 +38,30 @@ impl StatelessOp for MaxPool {
         let input: ArrayViewD<f32> = input.to_array_view()?;
 
         let patch = self.patch(input.shape());
-        let shape: TVec<usize> = patch.output_full_shape(patch.input_shape.c_dim());
-        let visitor = patch.wrap(&input);
+        unimplemented!();
+        /*
+        let shape = self.data_fmt.shape(input.shape());
+        let mut output_shape = input.shape().clone();
+        output_shape[shape.hw_axes()].copy_from_slice(&*patch.output_spatial_shape);
 
-        let mut values = unsafe { ArrayD::uninitialized(&*shape) };
+        let mut values = unsafe { ArrayD::<f32>::uninitialized(&*output_shape) };
         let mut indices = if self.with_index_outputs.is_some() {
-            Some(unsafe { ArrayD::uninitialized(&*shape) })
+            Some(unsafe { ArrayD::<i32>::uninitialized(&*output_shape) })
         } else {
             None
         };
-        ::ndarray::indices(&*shape).into_iter().for_each(|coords| {
-            let max = visitor
+        let c_stride = input.strides()[shape.c_axis()] as isize;
+        for i in 0..shape.n() {
+            let input = input.slice_axis(Axis(shape.n_axis()), (i..=i).into()).as_ptr();
+            for (center, hint) in patch.visit_all() {
+            }
+            for c in 0..shape.c() as isize {
+                let input = input.offset(c * c_stride);
+                for 
+            }
+        }
+        ::ndarray::indices(&*output_shape).into_iter().for_each(|coords| {
+            let max = patch
                 .at(&coords.slice())
                 .enumerate()
                 .filter_map(|(ix, v)| v.map(|v| (ix, v)))
@@ -67,6 +80,7 @@ impl StatelessOp for MaxPool {
         } else {
             Ok(tvec!(values.into()))
         }
+        */
     }
 }
 
@@ -94,8 +108,8 @@ impl InferenceRulesOp for MaxPool {
                 self.strides.as_ref().unwrap_or(&ones),
             );
             for o in 0..outputs.len() {
-                for (ix, &d) in computed.output.iter().enumerate() {
-                    s.equals(&outputs[o].shape[ix + ishape.h_axis()], d)?;
+                for (ix, d) in computed.dims.iter().enumerate() {
+                    s.equals(&outputs[o].shape[ix + ishape.h_axis()], d.output)?;
                 }
                 s.equals(&outputs[o].shape[ishape.n_axis()], ishape.n_dim())?;
                 s.equals(&outputs[o].shape[ishape.c_axis()], ishape.c_dim())?;
