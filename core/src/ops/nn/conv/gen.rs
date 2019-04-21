@@ -32,11 +32,7 @@ impl ::std::default::Default for Conv {
 }
 
 impl Conv {
-    fn output_shape<D: DimLike>(
-        &self,
-        ishape: &[D],
-        kshape: &[usize],
-    ) -> TVec<D> {
+    fn output_shape<D: DimLike>(&self, ishape: &[D], kshape: &[usize]) -> TVec<D> {
         let mut result: TVec<D> = ishape.into();
         let ishape = self.data_fmt.shape(ishape);
         let spatial_rank = ishape.hw_rank();
@@ -53,7 +49,9 @@ impl Conv {
             KernelFormat::HWIO => kshape[kshape.len() - 1] * self.group,
         };
         result[ishape.c_axis()] = channels_out.into();
-        result[ishape.hw_axes()].copy_from_slice(&computed.output);
+        for (ix, d) in computed.dims.iter().enumerate() {
+            result[ishape.h_axis() + ix] = d.output;
+        }
         result
     }
 
@@ -98,7 +96,8 @@ impl Op for Conv {
     }
 
     fn cost(&self, inputs: &[&TypedTensorInfo]) -> TractResult<TVec<(Cost, TDim)>> {
-        let unary = self.to_unary(&*inputs)?.ok_or_else(|| format!("Can not unarize conv: {:?}", self))?;
+        let unary =
+            self.to_unary(&*inputs)?.ok_or_else(|| format!("Can not unarize conv: {:?}", self))?;
         unary.cost(&[inputs[0]])
     }
 
@@ -180,7 +179,8 @@ impl InferenceRulesOp for Conv {
         })?;
         s.given_2(&inputs[0].shape, &inputs[1].shape, move |s, ishape, kshape| {
             if kshape.iter().all(|d| d.to_integer().is_ok()) {
-                let kshape:TVec<usize> = kshape.iter().map(|d| d.to_integer().unwrap() as _).collect();
+                let kshape: TVec<usize> =
+                    kshape.iter().map(|d| d.to_integer().unwrap() as _).collect();
                 let oshape = self.output_shape(&*ishape, &*kshape);
                 s.equals(&outputs[0].shape, oshape)?;
             }

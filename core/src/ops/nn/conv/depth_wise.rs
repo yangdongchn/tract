@@ -1,5 +1,5 @@
 use crate::internal::*;
-use crate::ops::nn::Patch;
+use crate::ops::nn::{ DataFormat, Patch };
 use ndarray::*;
 use std::iter::Sum;
 
@@ -10,6 +10,7 @@ pub struct DepthWise<T>
 where
     T: Datum + Clone + ndarray::LinalgScalar + std::ops::AddAssign<T> + PartialEq + Sum,
 {
+    data_format: DataFormat,
     patch: Patch,
     out_channels: usize,
     kernel_chw: ArrayD<T>,
@@ -20,6 +21,7 @@ impl<T> DepthWise<T>
 where
     T: Datum + Clone + ndarray::LinalgScalar + std::ops::AddAssign<T> + PartialEq + Sum,
 {
+    /*
     fn eval3(&self, mut inputs: TVec<SharedTensor>) -> TractResult<TVec<SharedTensor>> {
         let img = args_1!(inputs);
         let img = img.to_array_view::<T>()?;
@@ -97,6 +99,7 @@ where
         }
         Ok(tvec!(output.into()))
     }
+    */
 }
 
 impl<T> Op for DepthWise<T>
@@ -108,11 +111,14 @@ where
     }
 
     fn cost(&self, _inputs: &[&TypedTensorInfo]) -> TractResult<TVec<(Cost, TDim)>> {
+        unimplemented!()
+        /*
         let n_output_points = self.patch.output_spatial_shape.iter().cloned().product::<usize>();
         Ok(tvec!((
             Cost::FMA(T::datum_type()),
             (self.patch.input_shape.n() * n_output_points * self.kernel_chw.len()).to_dim()
         )))
+        */
     }
 }
 
@@ -121,11 +127,14 @@ where
     T: Datum + Clone + ndarray::LinalgScalar + std::ops::AddAssign<T> + PartialEq + Sum,
 {
     fn eval(&self, inputs: TVec<SharedTensor>) -> TractResult<TVec<SharedTensor>> {
+        unimplemented!()
+            /*
         match inputs[0].shape().len() {
             3 => self.eval3(inputs),
             4 => self.eval4(inputs),
             _ => self.evald(inputs),
         }
+            */
     }
 }
 

@@ -8,9 +8,12 @@ use crate::ops::nn::Patch;
 use num_traits::Zero;
 use std::ops::Mul;
 
+use super::super::DataFormat;
+
 #[derive(Debug, Clone)]
 pub(super) struct Im2Col<T: Copy + Datum + Mul + Zero> {
     pub patch: Patch,
+    pub data_format: DataFormat,
     pub m: usize,
     pub k: usize,
     pub n: usize,
@@ -33,6 +36,7 @@ impl<T: Copy + Datum + Mul + Zero> PartialEq for Im2Col<T> {
 
 impl<T: Copy + Datum + Mul + Zero> Im2Col<T> {
     pub fn new(
+        data_format: DataFormat,
         patch: Patch,
         m: usize,
         k: usize,
@@ -41,25 +45,25 @@ impl<T: Copy + Datum + Mul + Zero> Im2Col<T> {
         ci_per_group: usize,
         b_pack: PackB<T>,
     ) -> Im2Col<T> {
-        let patcher = if !patch.padded && patch.input_shape.hw_rank() == 2 {
+        let patcher = if !patch.padded && patch.rank() == 2 {
             Patcher::Valid2d
-        } else if patch.input_shape.hw_rank() == 2 {
+        } else if patch.rank() == 2 {
             Patcher::Padded2d
-        } else if !patch.padded && patch.input_shape.hw_rank() == 1 {
+        } else if !patch.padded && patch.rank() == 1 {
             Patcher::Valid1d
         } else {
             Patcher::Generic
         };
-        Im2Col { patch, m, k, n, group, ci_per_group, b_pack, patcher }
+        Im2Col { data_format, patch, m, k, n, group, ci_per_group, b_pack, patcher }
     }
 
-    pub(super) fn output_shape(&self) -> TractResult<TVec<usize>> {
-        let input_shape = &self.patch.input_shape;
-        Ok(tvec!(input_shape.n_dim(), self.group, self.b_pack.len()))
+    pub(super) fn output_shape(&self, input_shape: &[usize]) -> TractResult<TVec<usize>> {
+        let shape = self.data_format.shape(input_shape);
+        Ok(tvec!(shape.n_dim(), self.group, self.b_pack.len()))
     }
 
     pub(super) fn im2col<'i>(&'i self, input: &'i ArrayViewD<'i, T>) -> TractResult<Tensor> {
-        let input_shape = &self.patch.input_shape;
+        let input_shape = &self.data_format.shape(input.shape());
 
         let mut packed = unsafe {
             Tensor::uninitialized_aligned::<T>(
@@ -105,13 +109,7 @@ impl<T: Copy + Datum + Mul + Zero> InferenceRulesOp for Im2Col<T> {
         inputs: &'p [TensorProxy],
         outputs: &'p [TensorProxy],
     ) -> InferenceResult {
-        check_input_arity(&inputs, 1)?;
-        check_output_arity(&outputs, 1)?;
-        s.equals(&inputs[0].datum_type, T::datum_type())?;
-        s.equals(&inputs[0].datum_type, &outputs[0].datum_type)?;
-        s.equals(&inputs[0].shape, ShapeFact::from(&*self.patch.input_shape.shape))?;
-        s.equals(&outputs[0].shape, ShapeFact::from(&[self.b_pack.len() * self.group]))?;
-        Ok(())
+        unreachable!()
     }
 }
 
@@ -133,6 +131,7 @@ impl Patcher {
         g: usize,
     ) {
         match self {
+            /*
             Patcher::Valid1d => Self::valid_1d(
                 im2col,
                 input.view().into_dimensionality().as_ref().unwrap(),
@@ -154,6 +153,7 @@ impl Patcher {
                 i,
                 g,
             ),
+            */
             _ => Self::generic(im2col, input, pack, i, g),
         }
     }
@@ -167,19 +167,30 @@ impl Patcher {
         g: usize,
     ) {
         let mut mega_matrix = unsafe { Array2::<T>::uninitialized((im2col.k, im2col.n)) };
+        /*
         let visitor = im2col.patch.wrap(input);
         let mut coords = vec![0; im2col.patch.input_shape.rank()];
         coords[im2col.patch.input_shape.n_axis()] = i;
-        for (spatial, mut col) in ndarray::indices(&*im2col.patch.output_spatial_shape)
+        */
+        let input_shape = im2col.data_format.shape(input.shape());
+        let n_stride = input.strides()[input_shape.n_axis()];
+        let c_stride = input.strides()[input_shape.c_axis()];
+        let input = &input.as_slice().unwrap()[n_stride as usize *i..];
+        for (coords, mut col) in ndarray::indices(&*im2col.patch.output_shape)
             .into_iter()
             .zip(mega_matrix.axis_iter_mut(Axis(1)))
         {
             let mut col = col.iter_mut();
-            coords[im2col.patch.input_shape.hw_axes()].copy_from_slice(spatial.slice());
+            let mut visitor = im2col.patch.at(coords.slice());
             for ci in 0..im2col.ci_per_group {
-                coords[im2col.patch.input_shape.c_axis()] = ci + g * im2col.ci_per_group;
-                for v in visitor.at(&*coords) {
-                    *col.next().expect("geometry error in conv") = v.unwrap_or(T::default());
+                let offset = (ci + g * im2col.ci_per_group) as isize * c_stride;
+                visitor.rewind();
+                for v in visitor {
+                    *col.next().unwrap() = if let Some(value_offset) = v {
+                        input[(offset + value_offset) as usize]
+                    } else {
+                        T::default()
+                    };
                 }
             }
         }
@@ -191,6 +202,7 @@ impl Patcher {
         );
     }
 
+    /*
     #[inline(never)]
     fn valid_1d<'i, 'p, T: Copy + Datum + Mul + Zero>(
         im2col: &'i Im2Col<T>,
@@ -299,4 +311,5 @@ impl Patcher {
             }
         }
     }
+    */
 }

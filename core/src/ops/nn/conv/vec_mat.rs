@@ -14,6 +14,7 @@ pub struct VecMat<T>
 where
     T: Datum + Add + Mul + Zero + Copy,
 {
+    pub data_format: DataFormat,
     pub patch: Patch,
     pub full_output_shape: TVec<usize>,
     pub k: usize,
@@ -36,20 +37,20 @@ where
     ) -> TractResult<ArrayD<T>> {
         let mut output = unsafe { ArrayD::<T>::uninitialized(&*self.full_output_shape) };
         let packed_b_len = self.vmm.b_pack().len();
-        let input_shape = &self.patch.input_shape;
+        let output_shape = &self.data_format.shape(&*self.full_output_shape);
 
-        let co_per_group = self.full_output_shape[input_shape.c_axis()] / self.group;
-        for i in 0..input_shape.n_dim() {
+        let co_per_group = output_shape.c_dim() / self.group;
+        for i in 0..output_shape.n_dim() {
             unsafe {
                 let output_i =
-                    output.as_mut_ptr().offset(output.strides()[input_shape.n_axis()] * i as isize);
+                    output.as_mut_ptr().offset(output.strides()[output_shape.n_axis()] * i as isize);
                 for g in 0..self.group {
                     let a = &self.packed_kernels[g];
                     let output_i_g = output_i.offset(
-                        output.strides()[input_shape.c_axis()] * co_per_group as isize * g as isize,
+                        output.strides()[output_shape.c_axis()] * co_per_group as isize * g as isize,
                     );
 
-                    let stride_output = match self.patch.input_shape.fmt {
+                    let stride_output = match self.data_format {
                         DataFormat::NHWC => self.group as isize,
                         DataFormat::NCHW => 1,
                     };

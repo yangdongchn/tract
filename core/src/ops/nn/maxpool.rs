@@ -1,7 +1,7 @@
 use crate::internal::*;
 use ndarray::prelude::*;
 
-use super::{DataFormat, PaddingSpec, Patch};
+use super::{DataFormat, PaddingSpec, Patch, PatchSpec};
 
 #[derive(Debug, Clone, new, Default)]
 pub struct MaxPool {
@@ -15,14 +15,15 @@ pub struct MaxPool {
 impl MaxPool {
     fn patch(&self, input_full_shape: &[usize]) -> Patch {
         let shape = self.data_fmt.shape(input_full_shape);
-        Patch::new(
-            tvec![1; shape.hw_rank()],
-            self.kernel_shape.clone(),
-            &self.padding,
-            self.strides.clone().unwrap_or_else(|| tvec![1; shape.hw_rank()]),
-            shape.hw_dims().into(),
-            shape.hw_stride(),
-        )
+        PatchSpec {
+            dilations: tvec![1; shape.hw_rank()],
+            kernel_shape: self.kernel_shape.clone(),
+            padding: self.padding.clone(),
+            strides: self.strides.clone().unwrap_or_else(|| tvec![1; shape.hw_rank()]),
+            input_shape: shape.hw_dims().into(),
+            input_storage_stride: shape.hw_stride(),
+            output_storage_stride: shape.hw_stride(),
+        }.into_patch()
     }
 }
 
